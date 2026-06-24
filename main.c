@@ -2,454 +2,603 @@
 #include <stdlib.h>
 #include <math.h>
 #include <time.h>
-#define HEIGHT 9
-#define WIDTH 16
-#define MODULUS 7
-#define START 0
-#define GOAL ((HEIGHT-1)*WIDTH)
 
-/*
-directions
-	0: down,
-	1: right(-= 1),
-	2: up(+= WIDTH),
-	3: left(+= 1),
-	4: no direction,
-	5: invalid direction
- */
-int calc_direction(int start, int goal) {
-	if (start == goal) {
-		return 4;
-	} else if (start % WIDTH == goal % WIDTH) {
-		if (start < goal) {
-			return 0;
-		} else {
-			return 2;
-		}
-	} else if (start / WIDTH == goal / WIDTH) {
-		if (start < goal) {
+int min(int a, int b) {
+	if (a <= b) {
+		return a;
+	} else {
+		return b;
+	}
+}
+
+int max(int a, int b) {
+	if (a >= b) {
+		return a;
+	} else {
+		return b;
+	}
+}
+
+typedef struct Vertex Vertex;
+
+struct Vertex {
+	Vertex *succ;
+	int row;
+	int col;
+	int value;
+};
+
+typedef struct Space Space;
+
+struct Space {
+	int height;
+	int width;
+	int modulus;
+	Vertex *start;
+	Vertex *goal;
+};
+
+void print_vertices(Vertex *head) {
+	Vertex *cur;
+	int i = 0;
+	for (cur = head; cur->succ!=NULL; cur = cur->succ) {
+		i++;
+		printf("(%d, %d) ", cur->row, cur->col);
+	}
+	printf("(%d, %d) (%d)", cur->row, cur->col, i);
+	printf("\n");
+}
+
+void free_vertices(Vertex *head, Vertex *tail) {
+	for (Vertex *cur = head; cur->succ != tail;) {
+		Vertex *nxt = cur->succ;
+		free(cur);
+		cur = nxt;
+	}
+}
+
+int is_on_path(int row, int col, Space *space) {
+	for (Vertex *cur = space->start; cur->succ != NULL; cur = cur->succ) {
+		Vertex *nxt = cur->succ;
+		if (cur->row == nxt->row && cur->col == nxt->col) {
+			printf("Error in is_on_path\ncur-nxt is not edge\n");
+			exit(1);
+		} else if (
+				min(cur->row, nxt->row) != max(cur->row, nxt->row) &&
+				min(cur->col, nxt->col) != max(cur->col, nxt->col)
+			  ) {
+			printf("Error in is_on_path\ncur-nxt is neither vertical nor horizontal edge\n");
+			exit(1);
+		} else if (
+				min(cur->row, nxt->row) <= row && row <= max(cur->row, nxt->row) &&
+				min(cur->col, nxt->col) <= col && col <= max(cur->col, nxt->col)
+			  ) {
 			return 1;
 		} else {
-			return 3;
+			continue;
 		}
-	} else {
-		return 5;
 	}
+	return 0;
 }
 
-int is_crossed(int start, int goal, int *is_on_route) {
-	int direction = calc_direction(start, goal);
-
-	switch (direction) {
-		case 0:
-			for (int i = start + WIDTH; i < goal; i += WIDTH) {
-				if (is_on_route[i] == 1) {
-					return 1;
-				}
-			}
-			return 0;
-		case 1:
-			for (int i = start + 1; i < goal; i++) {
-				if (is_on_route[i] == 1) {
-					return 1;
-				}
-			}
-			return 0;
-		case 2:
-			for (int i = goal + WIDTH; i < start; i += WIDTH) {
-				if (is_on_route[i] == 1) {
-					return 1;
-				}
-			}
-			return 0;
-		case 3:
-			for (int i = goal + 1; i < start; i++) {
-				if (is_on_route[i] == 1) {
-					return 1;
-				}
-			}
-			return 0;
-		case 4:
-			return 0;
-		default:
-			printf("ERROR: in is_crossed; default\nstart:%d, goal:%d\n", start, goal);
+int is_crossed(Vertex *head, Space *space) {
+	Vertex *tail = head->succ;
+	for (Vertex *cur = space->start; cur->succ != NULL; cur = cur->succ) {
+		Vertex *nxt = cur->succ;
+		if (cur->row == nxt->row && cur->col == nxt->col) {
+			printf("Error in is_crossed\ncur-nxt is not edge\n");
+			printf("\tcur row: %d, col: %d\n\tnxt row: %d, col: %d\n", cur->row, cur->col, nxt->row, nxt->col);
 			exit(1);
-	}
-}
-
-void bridge(int start, int goal, int *is_on_route) {
-	if (is_crossed(start, goal, is_on_route)) {
-		printf("ERROR: in bridge; is crossed\n");
-		exit(1);
-	}
-	int direction = calc_direction(start, goal);
-	switch (direction) {
-		case 0:
-			for (int i = start; i <= goal; i += WIDTH) {
-				is_on_route[i] = 1;
-			}
-			break;
-		case 1:
-			for (int i = start; i <= goal; i++) {
-				is_on_route[i] = 1;
-			}
-			break;
-		case 2:
-			for (int i = goal; i <= start; i += WIDTH) {
-				is_on_route[i] = 1;
-			}
-			break;
-		case 3:
-			for (int i = goal; i <= start; i++) {
-				is_on_route[i] = 1;
-			}
-			break;
-		case 4:
-			break;
-		default:
-			printf("ERROR: in bridge; default\nstart:%d, goal:%d\n", start, goal);
+		} else if (
+				min(cur->row, nxt->row) != max(cur->row, nxt->row) &&
+				min(cur->col, nxt->col) != max(cur->col, nxt->col)
+			  ) {
+			printf("Error in is_crossed\ncur-nxt is neither vertical nor horizontal edge\n");
 			exit(1);
-	}
-}
-
-void unbridge(int start, int goal, int direction, int *is_on_route) {
-	switch (direction) {
-		case 0:
-			for (int i = start + WIDTH; i < goal; i += WIDTH) {
-				is_on_route[i] = 0;
-			}
-			break;
-		case 1:
-			for (int i = start + 1; i < goal; i++) {
-				is_on_route[i] = 0;
-			}
-			break;
-		case 2:
-			for (int i = goal + WIDTH; i < start; i += WIDTH) {
-				is_on_route[i] = 0;
-			}
-			break;
-		case 3:
-			for (int i = goal + 1; i < start; i++) {
-				is_on_route[i] = 0;
-			}
-			break;
-		default:
-			printf("ERROR: in unbridge; default\nstart:%d, goal:%d\n", start, goal);
+		} else if (
+				min(head->row, tail->row) != max(head->row, tail->row) &&
+				min(head->col, tail->col) != max(head->col, tail->col)
+			  ) {
+			printf("Error in is_crossed\nhead-tail is neither vertical nor horizontal edge\n");
 			exit(1);
-	}
-}
-
-int is_extendable(int start, int goal, int a, int b, int c, int d, int *is_on_route) {
-	return (
-		(!is_on_route[a] || a == start || a == goal) &&
-		(!is_on_route[b] || b == start || b == goal) &&
-		(!is_on_route[c] || c == start || c == goal) &&
-		(!is_on_route[d] || d == start || d == goal) &&
-		!is_crossed(start, a, is_on_route) &&
-		!is_crossed(a, b, is_on_route) &&
-		!is_crossed(b, c, is_on_route) &&
-		!is_crossed(c, d, is_on_route) &&
-		!is_crossed(d, goal, is_on_route)
-	);
-}
-
-void print_route(int *is_on_route) {
-	printf("\n");
-	for (int i = 0; i < HEIGHT; i++) {
-		for (int j = 0; j < WIDTH; j++) {
-			if (is_on_route[i*WIDTH+j]) {
-				printf("#");
-			} else {
-				printf(".");
-			}
-		}
-		printf("\n");
-	}
-}
-
-void print_arr(int length, int *arr, char *str) {
-	printf("%s[%d] = [", str, length);
-	for (int i = 0; i < length; i++) {
-		if (i % 10 == 0) printf("\n\t");
-		printf("%d, ", arr[i]);
-	}
-	printf("\n]\n");
-}
-
-void shift_arr(int length, int *arr, int head, int step) {
-	for (int i = length - 1 - step; i > head; i--) {
-		arr[i+step] = arr[i];
-	}
-}
-
-int extend_route(int distance, int *route, int *is_on_route) {
-	int is_changed = 0;
-	for (int i = 0; i < distance - 1;) {
-		int length = 1;
-
-		int *candidates = (int *)malloc(length * sizeof(int));
-		candidates[length-1] = -1;
-		int direction = calc_direction(route[i], route[i+1]);
-		unbridge(route[i], route[i+1], direction, is_on_route);
-
-		switch (direction) {
-			case 0:
-				for (int j = 0; j < HEIGHT*WIDTH; j++) {
-					for (int k = j + WIDTH; k < HEIGHT*WIDTH; k += WIDTH) {
-						int l = (j / WIDTH) * WIDTH + route[i] % WIDTH;
-						int m = (k / WIDTH) * WIDTH + route[i+1] % WIDTH;
-						if (is_extendable(route[i], route[i+1], l, j, k, m, is_on_route)) {
-							candidates[length-1] = j*HEIGHT*WIDTH + k;
-							length++;
-							int *tmp = (int *)realloc(candidates, length * sizeof(int));
-							candidates = tmp;
-							candidates[length-1] = -1;
-						}
-					}
-				}
-				break;
-			case 1:
-				for (int j = 0; j < HEIGHT*WIDTH; j++) {
-					for (int k = j + 1; k < ((j / WIDTH) + 1) * WIDTH; k++) {
-						int l = (route[i] / WIDTH) * WIDTH + j % WIDTH;
-						int m = (route[i+1] / WIDTH) * WIDTH + k % WIDTH;
-						if (is_extendable(route[i], route[i+1], l, j, k, m, is_on_route)) {
-							candidates[length-1] = j*HEIGHT*WIDTH + k;
-							length++;
-							int *tmp = (int *)realloc(candidates, length * sizeof(int));
-							candidates = tmp;
-							candidates[length-1] = -1;
-						}
-					}
-				}
-				break;
-			case 2:
-				for (int j = 0; j < HEIGHT*WIDTH; j++) {
-					for (int k = j - WIDTH; 0 <= k; k -= WIDTH) {
-						int l = (j / WIDTH) * WIDTH + route[i] % WIDTH;
-						int m = (k / WIDTH) * WIDTH + route[i+1] % WIDTH;
-						if (is_extendable(route[i], route[i+1], l, j, k, m, is_on_route)) {
-							candidates[length-1] = j*HEIGHT*WIDTH + k;
-							length++;
-							int *tmp = (int *)realloc(candidates, length * sizeof(int));
-							candidates = tmp;
-							candidates[length-1] = -1;
-						}
-					}
-				}
-				break;
-			case 3:
-				for (int j = 0; j < HEIGHT*WIDTH; j++) {
-					for (int k = j - 1; (j / WIDTH) * WIDTH <= k; k--) {
-						int l = (route[i] / WIDTH) * WIDTH + j % WIDTH;
-						int m = (route[i+1] / WIDTH) * WIDTH + k % WIDTH;
-						if (is_extendable(route[i], route[i+1], l, j, k, m, is_on_route)) {
-							candidates[length-1] = j*HEIGHT*WIDTH + k;
-							length++;
-							int *tmp = (int *)realloc(candidates, length * sizeof(int));
-							candidates = tmp;
-							candidates[length-1] = -1;
-						}
-					}
-				}
-				break;
-			default:
-				printf("ERROR: in extend_route; default\n");
-				exit(1);
-		}
-
-		if (candidates[0] == -1) {
-			bridge(route[i], route[i+1], is_on_route);
-			i++;
+		} else if (
+				cur == head || cur == tail || nxt == head || nxt == tail
+			  ) {
+			continue;
+		} else if (
+				(min(cur->row, nxt->row) <= max(head->row, tail->row) &&
+				 max(cur->row, nxt->row) >= min(head->row, tail->row)) &&
+				(min(cur->col, nxt->col) <= max(head->col, tail->col) &&
+				 max(cur->col, nxt->col) >= min(head->col, tail->col))
+			  ) {
+			return 1;
 		} else {
-
-			int choice = candidates[(int) (rand() / (RAND_MAX + 1.0) * length - 1)];
-			print_arr(length, candidates, "cand");
-
-			free(candidates);
-
-			int a, b, c, d;
-			b = choice / (HEIGHT*WIDTH);
-			c = choice % (HEIGHT*WIDTH);
-			switch (direction) {
-				case 0:
-				case 2:
-					a = (b / WIDTH) * WIDTH + route[i] % WIDTH;
-					d = (c / WIDTH) * WIDTH + route[i+1] % WIDTH;
-					break;
-				case 1:
-				case 3:
-					a = (route[i] / WIDTH) * WIDTH + b % WIDTH;
-					d = (route[i+1] / WIDTH) * WIDTH + c % WIDTH;
-					break;
-			}
-
-			printf("choice:%d, a:%d, b%d, c%d, d%d", choice, a, b, c, d);
-
-			if (a == b && c == d) {
-				bridge(route[i], route[i+1], is_on_route);
-				i++;
-			} else if (route[i] == a && route[i+1] == d) {
-				bridge(route[i], a, is_on_route);
-				bridge(a, b, is_on_route);
-				bridge(b, c, is_on_route);
-				bridge(c, d, is_on_route);
-				bridge(d, route[i+1], is_on_route);
-				is_changed = 1;
-				distance += 2;
-				shift_arr(distance, route, i, 2);
-				int tmp = route[i+1];
-				route[i+1] = b;
-				route[i+2] = c;
-				route[i+3] = tmp;
-				i += 3;
-			} else if (route[i] == a) {
-				bridge(route[i], a, is_on_route);
-				bridge(a, b, is_on_route);
-				bridge(b, c, is_on_route);
-				bridge(c, d, is_on_route);
-				bridge(d, route[i+1], is_on_route);
-				is_changed = 1;
-				distance += 3;
-				shift_arr(distance, route, i, 3);
-				int tmp = route[i+1];
-				route[i+1] = b;
-				route[i+2] = c;
-				route[i+3] = d;
-				route[i+4] = tmp;
-				i += 4;
-			} else if (route[i+1] == d) {
-				bridge(route[i], a, is_on_route);
-				bridge(a, b, is_on_route);
-				bridge(b, c, is_on_route);
-				bridge(c, d, is_on_route);
-				bridge(d, route[i+1], is_on_route);
-				is_changed = 1;
-				distance += 3;
-				shift_arr(distance, route, i, 3);
-				int tmp = route[i+1];
-				route[i+1] = a;
-				route[i+2] = b;
-				route[i+3] = c;
-				route[i+4] = tmp;
-				i += 4;
-			} else {
-				bridge(route[i], a, is_on_route);
-				bridge(a, b, is_on_route);
-				bridge(b, c, is_on_route);
-				bridge(c, d, is_on_route);
-				bridge(d, route[i+1], is_on_route);
-				is_changed = 1;
-				distance += 4;
-				shift_arr(distance, route, i, 4);
-				int tmp = route[i+1];
-				route[i+1] = a;
-				route[i+2] = b;
-				route[i+3] = c;
-				route[i+4] = d;
-				route[i+5] = tmp;
-				i += 5;
-			}
-			print_route(is_on_route);
+			continue;
 		}
 	}
-	if (is_changed || distance < HEIGHT*WIDTH/2) {
-		distance = extend_route(distance, route, is_on_route);
-	}
-	return distance;
+	return 0;
 }
 
-int gen_route(int *route) {
-	int is_on_route[HEIGHT*WIDTH];
-	for (int i = 0; i < HEIGHT*WIDTH; i++) {
-		is_on_route[i] = 0;
+void extend_path(Space *space) {
+	int changed = 0;
+	for (Vertex *cur = space->start; cur->succ != NULL;) {
+		Vertex *nxt = cur->succ;
+
+		int no_choices = 1;
+		Vertex **choices = (Vertex **)malloc(no_choices * sizeof(Vertex *));
+		if (choices == NULL) {
+			printf("Error in extend_path\nfailed to malloc\n");
+			exit(1);
+		}
+		choices[0] = nxt;
+
+		for (int i = 0; i < space->width; i++) {
+			for (int j = 0; j < space->width; j++) {
+				if (i == j) {
+					if (
+							cur->row != nxt->row &&
+							i != cur->col && i != nxt->col &&
+							j != cur->col && j != nxt->col
+					   ) {
+						// save memory
+						Vertex *a = (Vertex *)malloc(sizeof(Vertex));
+						Vertex *b = (Vertex *)malloc(sizeof(Vertex));
+
+						// set position
+						a->row = cur->row; a->col = i;
+						b->row = nxt->row; b->col = j;
+
+						// connect
+						cur->succ = a;
+						a->succ = b;
+						b->succ = nxt;
+
+						if (
+								is_crossed(cur, space) ||
+								is_crossed(a, space) ||
+								is_crossed(b, space)
+						   ) {
+							// reconnect
+							cur->succ = nxt;
+
+							free(a);
+							free(b);
+						} else {
+							// extend choices
+							no_choices++;
+							Vertex **tmp = (Vertex **)realloc(choices, no_choices * sizeof(Vertex *));
+							if (tmp == NULL) {
+								printf("Error in extend_route\nfailed to realloc\n");
+								free(choices);
+								exit(1);
+							}
+							choices = tmp;
+							choices[no_choices-1] = a;
+						}
+					}
+				} else {
+					for (int k = 0; k < space->height; k++) {
+						if (
+								i != cur->col && i != nxt->col &&
+								j != cur->col && j != nxt->col &&
+								k != cur->row && k != nxt->row
+						   ) {
+							// save memory
+							Vertex *a = (Vertex *)malloc(sizeof(Vertex));
+							Vertex *b = (Vertex *)malloc(sizeof(Vertex));
+							Vertex *c = (Vertex *)malloc(sizeof(Vertex));
+							Vertex *d = (Vertex *)malloc(sizeof(Vertex));
+
+							// set position
+							a->row = cur->row; a->col = i;
+							b->row = k; b->col = i;
+							c->row = k; c->col = j;
+							d->row = nxt->row; d->col = j;
+
+							// connect
+							cur->succ = a;
+							a->succ = b;
+							b->succ = c;
+							c->succ = d;
+							d->succ = nxt;
+
+							if (
+									is_crossed(cur, space) ||
+									is_crossed(a, space) ||
+									is_crossed(b, space) ||
+									is_crossed(c, space) ||
+									is_crossed(d, space)
+							   ) {
+								// reconnect
+								cur->succ = nxt;
+
+								free(a);
+								free(b);
+								free(c);
+								free(d);
+							} else {
+								// extend choices
+								no_choices++;
+								Vertex **tmp = (Vertex **)realloc(choices, no_choices * sizeof(Vertex *));
+								if (tmp == NULL) {
+									printf("Error in extend_route\nfailed to realloc\n");
+									free(choices);
+									exit(1);
+								}
+								choices = tmp;
+								choices[no_choices-1] = a;
+							}
+						}
+					}
+				}
+			}
+		}
+
+		for (int i = 0; i < space->width; i++) {
+			for (int j = 0; j < space->height; j++) {
+				if (
+						i != cur->col && i != nxt->col &&
+						j != cur->row && j != nxt->row
+				   ) {
+					// save memory
+					Vertex *a = (Vertex *)malloc(sizeof(Vertex));
+					Vertex *b = (Vertex *)malloc(sizeof(Vertex));
+					Vertex *c = (Vertex *)malloc(sizeof(Vertex));
+
+					// set position
+					a->row = cur->row; a->col = i;
+					b->row = j; b->col = i;
+					c->row = j; c->col = nxt->col;
+
+					// connect
+					cur->succ = a;
+					a->succ = b;
+					b->succ = c;
+					c->succ = nxt;
+
+					if (
+							is_crossed(cur, space) ||
+							is_crossed(a, space) ||
+							is_crossed(b, space) ||
+							is_crossed(c, space)
+					   ) {
+						// reconnect
+						cur->succ = nxt;
+
+						free(a);
+						free(b);
+						free(c);
+					} else {
+						// extend choices
+						no_choices++;
+						Vertex **tmp = (Vertex **)realloc(choices, no_choices * sizeof(Vertex *));
+						if (tmp == NULL) {
+							printf("Error in extend_route\nfailed to realloc\n");
+							free(choices);
+							exit(1);
+						}
+						choices = tmp;
+						choices[no_choices-1] = a;
+					}
+				}
+			}
+		}
+
+		for (int i = 0; i < space->height; i++) {
+			for (int j = 0; j < space->width; j++) {
+				if (
+						i != cur->row && i != nxt->row &&
+						j != cur->col && j != nxt->col
+				   ) {
+					// save memory
+					Vertex *a = (Vertex *)malloc(sizeof(Vertex));
+					Vertex *b = (Vertex *)malloc(sizeof(Vertex));
+					Vertex *c = (Vertex *)malloc(sizeof(Vertex));
+
+					// set position
+					a->row = i; a->col = cur->col;
+					b->row = i; b->col = j;
+					c->row = nxt->row; c->col = j;
+
+					// connect
+					cur->succ = a;
+					a->succ = b;
+					b->succ = c;
+					c->succ = nxt;
+
+					if (
+							is_crossed(cur, space) ||
+							is_crossed(a, space) ||
+							is_crossed(b, space) ||
+							is_crossed(c, space)
+					   ) {
+						// reconnect
+						cur->succ = nxt;
+
+						free(a);
+						free(b);
+						free(c);
+					} else {
+						// extend choices
+						no_choices++;
+						Vertex **tmp = (Vertex **)realloc(choices, no_choices * sizeof(Vertex *));
+						if (tmp == NULL) {
+							printf("Error in extend_route\nfailed to realloc\n");
+							free(choices);
+							exit(1);
+						}
+						choices = tmp;
+						choices[no_choices-1] = a;
+					}
+				}
+			}
+		}
+
+		for (int i = 0; i < space->height; i++) {
+			for (int j = 0; j < space->height; j++) {
+				if (i == j) {
+					if (
+							cur->col != nxt->col &&
+							i != cur->row && i != nxt->row &&
+							j != cur->row && j != nxt->row
+					   ) {
+						// save memory
+						Vertex *a = (Vertex *)malloc(sizeof(Vertex));
+						Vertex *b = (Vertex *)malloc(sizeof(Vertex));
+
+						// set position
+						a->row = i; a->col = cur->col;
+						b->row = j; b->col = nxt->col;
+
+						// connect
+						cur->succ = a;
+						a->succ = b;
+						b->succ = nxt;
+
+						if (
+								is_crossed(cur, space) ||
+								is_crossed(a, space) ||
+								is_crossed(b, space)
+						   ) {
+							// reconnect
+							cur->succ = nxt;
+
+							free(a);
+							free(b);
+						} else {
+							// extend choices
+							no_choices++;
+							Vertex **tmp = (Vertex **)realloc(choices, no_choices * sizeof(Vertex *));
+							if (tmp == NULL) {
+								printf("Error in extend_route\nfailed to realloc\n");
+								free(choices);
+								exit(1);
+							}
+							choices = tmp;
+							choices[no_choices-1] = a;
+						}
+					}
+				} else {
+					for (int k = 0; k < space->width; k++) {
+						if (
+								i != cur->row && i != nxt->row &&
+								j != cur->row && j != nxt->row &&
+								k != cur->col && k != nxt->col
+						   ) {
+							// save memory
+							Vertex *a = (Vertex *)malloc(sizeof(Vertex));
+							Vertex *b = (Vertex *)malloc(sizeof(Vertex));
+							Vertex *c = (Vertex *)malloc(sizeof(Vertex));
+							Vertex *d = (Vertex *)malloc(sizeof(Vertex));
+
+							// set position
+							a->row = i; a->col = cur->col;
+							b->row = i; b->col = k;
+							c->row = j; c->col = k;
+							d->row = j; d->col = nxt->col;
+
+							// connect
+							cur->succ = a;
+							a->succ = b;
+							b->succ = c;
+							c->succ = d;
+							d->succ = nxt;
+
+							if (
+									is_crossed(cur, space) ||
+									is_crossed(a, space) ||
+									is_crossed(b, space) ||
+									is_crossed(c, space) ||
+									is_crossed(d, space)
+							   ) {
+								// reconnect
+								cur->succ = nxt;
+
+								free(a);
+								free(b);
+								free(c);
+								free(d);
+							} else {
+								// extend choices
+								no_choices++;
+								Vertex **tmp = (Vertex **)realloc(choices, no_choices * sizeof(Vertex *));
+								if (tmp == NULL) {
+									printf("Error in extend_route\nfailed to realloc\n");
+									free(choices);
+									exit(1);
+								}
+								choices = tmp;
+								choices[no_choices-1] = a;
+							}
+						}
+					}
+				}
+			}
+		}
+
+		if (no_choices == 1) {
+			cur->succ = nxt;
+		} else {
+			changed = 1;
+
+			int choice = (rand() / (RAND_MAX + 1.0) * no_choices);
+			cur->succ = choices[choice];
+
+			for (int i = 1; i < no_choices; i++) {
+				if (i != choice) {
+					free_vertices(choices[i], nxt);
+				}
+			}
+			free(choices);
+		}
+		cur = nxt;
 	}
-
-	route[0] = START;
-	is_on_route[route[0]] = 1;
-	route[1] = GOAL;
-	is_on_route[route[1]] = 1;
-
-	return extend_route(2, route, is_on_route);
+	if (changed) {
+		extend_path(space);
+	}
 }
 
-void print_assignment(int *assignment) {
-	for (int i = 0; i < HEIGHT; i++) {
-		for (int j = 0; j < WIDTH; j++) {
-			if (assignment[i*WIDTH+j] >= 0) {
-				printf("%d", assignment[i*WIDTH+j]);
+void assign_number(Space *space) {
+	int index = 0;
+
+	Vertex *cur;
+	for (cur = space->start; cur->succ != NULL;) {
+		Vertex *nxt = cur->succ;
+		if (cur->row == nxt->row && cur->col == nxt->col) {
+			printf("Error in assign_number\ncur-nxt is not edge\n");
+			exit(1);
+		} else if (cur->row == nxt->row && cur->col < nxt->col) {
+			cur->value = index % space->modulus;
+			index++;
+
+			Vertex *tmp = cur;
+			for (int i = cur->col + 1; i < nxt->col; i++) {
+				Vertex *a = (Vertex *)malloc(sizeof(Vertex));
+
+				a->row = cur->row; a->col = i;
+				a->value = index % space->modulus;
+				index++;
+
+				tmp->succ = a;
+				tmp = a;
+			}
+			tmp->succ = nxt;
+		} else if (cur->row == nxt->row && cur->col > nxt->col) {
+			cur->value = index % space->modulus;
+			index++;
+
+			Vertex *tmp = cur;
+			for (int i = cur->col - 1; i > nxt->col; i--) {
+				Vertex *a = (Vertex *)malloc(sizeof(Vertex));
+
+				a->row = cur->row; a->col = i;
+				a->value = index % space->modulus;
+				index++;
+
+				tmp->succ = a;
+				tmp = a;
+			}
+			tmp->succ = nxt;
+		} else if (cur->col == nxt->col && cur->row < nxt->row) {
+			cur->value = index % space->modulus;
+			index++;
+
+			Vertex *tmp = cur;
+			for (int i = cur->row + 1; i < nxt->row; i++) {
+				Vertex *a = (Vertex *)malloc(sizeof(Vertex));
+
+				a->row = i; a->col = cur->col;
+				a->value = index % space->modulus;
+				index++;
+
+				tmp->succ = a;
+				tmp = a;
+			}
+			tmp->succ = nxt;
+		} else if (cur->col == nxt->col && cur->row > nxt->row) {
+			cur->value = index % space->modulus;
+			index++;
+
+			Vertex *tmp = cur;
+			for (int i = cur->row - 1; i > nxt->row; i--) {
+				Vertex *a = (Vertex *)malloc(sizeof(Vertex));
+
+				a->row = i; a->col = cur->col;
+				a->value = index % space->modulus;
+				index++;
+
+				tmp->succ = a;
+				tmp = a;
+			}
+			tmp->succ = nxt;
+		} else {
+			printf("Error in assign_number\ncur-nxt is neither vertical nor horizontal edge\n");
+			exit(1);
+		}
+		cur = nxt;
+	}
+	cur->value = index % space->modulus;
+}
+
+Vertex *find_vertex(int row, int col, Space *space) {
+	Vertex *cur;
+	for (cur = space->start; cur->succ != NULL; cur = cur->succ) {
+		if (cur->row == row && cur->col == col) {
+			return cur;
+		}
+	}
+	if (cur->row == row && cur->col == col) {
+		return cur;
+	}
+	return NULL;
+}
+
+void print_assignment(Space *space) {
+	for (int i = 0; i < space->height; i++) {
+		for (int j = 0; j < space->width; j++) {
+			Vertex *cur = find_vertex(i, j, space);
+			if (cur) {
+				printf(" %2d", cur->value);
 			} else {
-				printf(" ");
+				printf("   ");
 			}
 		}
 		printf("\n");
 	}
-	printf("\n");
 }
 
-int assign_on_edge(int *assignment, int start, int goal, int index) {
-	int direction = calc_direction(start, goal);
-	int i;
-	switch (direction) {
-		case 0:
-			for (i = start; i < goal; i += WIDTH) {
-				assignment[i] = index % MODULUS;
-				index++;
-			}
-			break;
-		case 1:
-			for (i = start; i < goal; i++) {
-				assignment[i] = index % MODULUS;
-				index++;
-			}
-			break;
-		case 2:
-			for (i = start; i > goal; i -= WIDTH) {
-				assignment[i] = index % MODULUS;
-				index++;
-			}
-			break;
-		case 3:
-			for (i = start; i > goal; i--) {
-				assignment[i] = index % MODULUS;
-				index++;
-			}
-			break;
-		case 4:
-			break;
-		default:
-			printf("ERROR: in assign_on_edge; default\nstart:%d, goal:%d\n", start, goal);
-			exit(1);
-	}
-	assignment[i] = index % MODULUS;
-	return index;
-}
+void gen_path(Space *space) {
+	// init path, a sequence of vertices
+	space->start = (Vertex *)malloc(sizeof(Vertex));
+	space->goal = (Vertex *)malloc(sizeof(Vertex));
 
-void assign_number(int distance, int *route, int *assignment) {
-	int index = 0;
-	for (int i = 0; i < distance - 1; i++) {
-		printf("%d: FROM->TO: %d -> %d\n", i, route[i], route[i+1]);
-		index = assign_on_edge(assignment, route[i], route[i+1], index);
-		print_assignment(assignment);
-	}
-	print_assignment(assignment);
+	space->start->succ = space->goal;
+	space->start->row = 0; space->start->col = 0;
+	space->goal->row = 8; space->goal->col = 0;
+
+	extend_path(space);
+
+	assign_number(space);
+
+	print_assignment(space);
+
+	free_vertices(space->start, NULL);
+	free(space->goal);
 }
 
 int main(void) {
+	// set seed
 	srand(time(NULL));
 
-	int distance;
-	int route[HEIGHT*WIDTH];
-	distance = gen_route(route);
+	// init space
+	Space space = {
+		.height = 9,
+		.width = 16,
+		.modulus = 7
+	};
 
-	print_arr(distance, route, "route");
+	gen_path(&space);
 
-	int assignment[HEIGHT*WIDTH];
-	for (int i = 0; i < HEIGHT*WIDTH; i++) {
-		assignment[i] = -1;
-	}
-	assign_number(distance, route, assignment);
+	
 
-	return 0;
 }
