@@ -1,604 +1,420 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <math.h>
 #include <time.h>
+#include "cdcl_sat_clone.c"
 
-int min(int a, int b) {
-	if (a <= b) {
-		return a;
-	} else {
-		return b;
-	}
+typedef struct {
+    int height;
+    int width;
+    int order;
+    int module;
+    int start;
+    int goal;
+    int *degrees;
+    int **edges;
+    int uniqueness;
+    int *assignment;
+} Problem;
+
+Problem *new_problem()
+{
+    Problem *problem = (Problem *)malloc(sizeof(Problem));
+    problem->height = 3;
+    problem->width = 3;
+    problem->order = problem->height * problem->width;
+    problem->module = 3;
+    problem->start = 0;
+    problem->goal = problem->order - problem->width;
+
+    int *degrees = (int *)malloc(sizeof(int) * problem->order);
+    int **edges = (int **)malloc(sizeof(int *) * problem->order);
+    for (int i = 0; i < problem->order; i++) {
+        edges[i] = (int *)malloc(sizeof(int) * 4);
+        degrees[i] = 0;
+        if (i >= problem->width) {
+            edges[i][degrees[i]] = i - problem->width;
+            degrees[i]++;
+        }
+	if (i % problem->width != 0) {
+            edges[i][degrees[i]] = i - 1;
+            degrees[i]++;
+        }
+        if (i % problem->width != problem->width - 1) {
+            edges[i][degrees[i]] = i + 1;
+            degrees[i]++;
+        }
+        if (i < problem->order - problem->width) {
+            edges[i][degrees[i]] = i + problem->width;
+            degrees[i]++;
+        }
+    }
+    problem->degrees = degrees;
+    problem->edges = edges;
+    problem->assignment = (int *)malloc(sizeof(int) * problem->order);
+    for (int i = 0; i < problem->order; i++) {
+        problem->assignment[i] = -1;
+    }
+    problem->assignment[problem->start] = 0 % problem->module;
+    problem->assignment[problem->goal] = (problem->order - 1) % problem->module;
+
+    return problem;
 }
 
-int max(int a, int b) {
-	if (a >= b) {
-		return a;
-	} else {
-		return b;
-	}
+void debug_problem(Problem *problem)
+{
+    printf("height = %d, ", problem->height);
+    printf("width = %d, ", problem->width);
+    printf("order = %d, ", problem->order);
+    printf("module = %d, \n", problem->module);
+    printf("start = %d, ", problem->start);
+    printf("goal = %d\n", problem->goal);
+
+    for (int i = 0; i < problem->order; i++) {
+        printf("degrees[%d] = %d, edges[i][] = {", i, problem->degrees[i]);
+        for (int j = 0; j < problem->degrees[i]; j++) {
+            printf("%4d,", problem->edges[i][j]);
+        }
+        printf("}\n");
+    }
+
+    printf("assignment = {\n");
+    for (int i = 0; i < problem->height; i++) {
+        printf("\t");
+        for (int j = 0; j < problem->width; j++) {
+            printf("%4d,", problem->assignment[i * problem->width + j]);
+        }
+        printf("\n");
+    }
+    printf("}\n");
 }
 
-typedef struct Vertex Vertex;
+void print_problem(Problem *problem)
+{
+    printf("start = %d, ", problem->start);
+    printf("goal = %d, ", problem->goal);
+    printf("module = %d\n", problem->module);
 
-struct Vertex {
-	Vertex *succ;
-	int row;
-	int col;
-	int value;
-};
-
-typedef struct Space Space;
-
-struct Space {
-	int height;
-	int width;
-	int modulus;
-	Vertex *start;
-	Vertex *goal;
-};
-
-void print_vertices(Vertex *head) {
-	Vertex *cur;
-	int i = 0;
-	for (cur = head; cur->succ!=NULL; cur = cur->succ) {
-		i++;
-		printf("(%d, %d) ", cur->row, cur->col);
-	}
-	printf("(%d, %d) (%d)", cur->row, cur->col, i);
-	printf("\n");
+    printf("assignment = {\n");
+    for (int i = 0; i < problem->height; i++) {
+        printf("\t");
+        for (int j = 0; j < problem->width; j++) {
+            if (problem->assignment[i * problem->width + j] != -1) {
+                printf("%4d,", problem->assignment[i * problem->width + j]);
+            } else {
+                printf("%*s,", 4, " ");
+            }
+        }
+        printf("\n");
+    }
+    printf("}\n");
 }
 
-void free_vertices(Vertex *head, Vertex *tail) {
-	for (Vertex *cur = head; cur->succ != tail;) {
-		Vertex *nxt = cur->succ;
-		free(cur);
-		cur = nxt;
-	}
+void free_problem(Problem *problem)
+{
+    free(problem->degrees);
+    for (int i = 0; i < problem->order; i++) {
+        free(problem->edges[i]);
+    }
+    free(problem->edges);
+    free(problem->assignment);
+    free(problem);
 }
 
-int is_on_path(int row, int col, Space *space) {
-	for (Vertex *cur = space->start; cur->succ != NULL; cur = cur->succ) {
-		Vertex *nxt = cur->succ;
-		if (cur->row == nxt->row && cur->col == nxt->col) {
-			printf("Error in is_on_path\ncur-nxt is not edge\n");
-			exit(1);
-		} else if (
-				min(cur->row, nxt->row) != max(cur->row, nxt->row) &&
-				min(cur->col, nxt->col) != max(cur->col, nxt->col)
-			  ) {
-			printf("Error in is_on_path\ncur-nxt is neither vertical nor horizontal edge\n");
-			exit(1);
-		} else if (
-				min(cur->row, nxt->row) <= row && row <= max(cur->row, nxt->row) &&
-				min(cur->col, nxt->col) <= col && col <= max(cur->col, nxt->col)
-			  ) {
-			return 1;
-		} else {
-			continue;
-		}
-	}
-	return 0;
+Sat *convert(Problem *problem, int distance)
+{
+    Sat *sat = sat_create();
+
+    for (int i = 0; i < distance; i++) {
+        for(int j = 0; j < problem->order; j++) {
+            sat_new_var(sat);
+        }
+    }
+
+    int *clause_s = (int *)malloc(sizeof(int));
+    clause_s[0] = SAT_POS(0 * problem->order + problem->start);
+    sat_add_clause(sat, clause_s, 1);
+    free(clause_s);
+    
+    int *clause_g = (int *)malloc(sizeof(int));
+    clause_g[0] = SAT_POS((distance - 1) * problem->order + problem->goal);
+    sat_add_clause(sat, clause_g, 1);
+    free(clause_g);
+
+    for (int i = 0; i < distance; i++) {
+	int *clause = (int *)malloc(sizeof(int) * problem->order);
+        for(int j = 0; j < problem->order; j++) {
+            clause[j] = SAT_POS(i * problem->order + j);
+        }
+        sat_add_clause(sat, clause, problem->order);
+        free(clause);
+    }
+
+    for (int i = 0; i < distance; i++) {
+        for(int j = 0; j + 1 < problem->order; j++) {
+            for(int k = j + 1; k < problem->order; k++) {
+                int *clause = (int *)malloc(sizeof(int) * 2);
+                clause[0] = SAT_NEG(i * problem->order + j);
+                clause[1] = SAT_NEG(i * problem->order + k);
+                sat_add_clause(sat, clause, 2);
+                free(clause);
+            }
+        }
+    }
+
+    for (int i = 0; i < problem->order; i++) {
+        for(int j = 0; j + 1 < distance; j++) {
+            for(int k = j + 1; k < distance; k++) {
+                int *clause = (int *)malloc(sizeof(int) * 2);
+                clause[0] = SAT_NEG(j * problem->order + i);
+                clause[1] = SAT_NEG(k * problem->order + i);
+                sat_add_clause(sat, clause, 2);
+                free(clause);
+            }
+        }
+    }
+
+    for (int i = 0; i + 1 < distance; i++) {
+        for (int j = 0; j < problem->order; j++) {
+            int *clause = (int *)malloc(sizeof(int) * (problem->degrees[j] + 1));
+            clause[0] = SAT_NEG(i * problem->order + j);
+            for (int k = 0; k < problem->degrees[j]; k++) {
+                clause[1 + k] = SAT_POS((i + 1) * problem->order + problem->edges[j][k]);
+            }
+            sat_add_clause(sat, clause, problem->degrees[j] + 1);
+            free(clause);
+        }
+    }
+
+    for (int i = 0; i < problem->order; i++) {
+        if (problem->assignment[i] != -1) {
+            int *clause = (int *)malloc(sizeof(int) * distance);
+            int n = 0;
+            for (int j = 0; j < distance; j++) {
+                if (j % problem->module == problem->assignment[i]) {
+                    clause[n] = SAT_POS(j * problem->order + i);
+                    n++;
+                }
+            }
+            sat_add_clause(sat, clause, n);
+            free(clause);
+        }
+    }
+
+    return sat;
 }
 
-int is_crossed(Vertex *head, Space *space) {
-	Vertex *tail = head->succ;
-	for (Vertex *cur = space->start; cur->succ != NULL; cur = cur->succ) {
-		Vertex *nxt = cur->succ;
-		if (cur->row == nxt->row && cur->col == nxt->col) {
-			printf("Error in is_crossed\ncur-nxt is not edge\n");
-			printf("\tcur row: %d, col: %d\n\tnxt row: %d, col: %d\n", cur->row, cur->col, nxt->row, nxt->col);
-			exit(1);
-		} else if (
-				min(cur->row, nxt->row) != max(cur->row, nxt->row) &&
-				min(cur->col, nxt->col) != max(cur->col, nxt->col)
-			  ) {
-			printf("Error in is_crossed\ncur-nxt is neither vertical nor horizontal edge\n");
-			exit(1);
-		} else if (
-				min(head->row, tail->row) != max(head->row, tail->row) &&
-				min(head->col, tail->col) != max(head->col, tail->col)
-			  ) {
-			printf("Error in is_crossed\nhead-tail is neither vertical nor horizontal edge\n");
-			exit(1);
-		} else if (
-				cur == head || cur == tail || nxt == head || nxt == tail
-			  ) {
-			continue;
-		} else if (
-				(min(cur->row, nxt->row) <= max(head->row, tail->row) &&
-				 max(cur->row, nxt->row) >= min(head->row, tail->row)) &&
-				(min(cur->col, nxt->col) <= max(head->col, tail->col) &&
-				 max(cur->col, nxt->col) >= min(head->col, tail->col))
-			  ) {
-			return 1;
-		} else {
-			continue;
-		}
-	}
-	return 0;
+void sat_add_assignment(Sat *sat, Problem *problem, int distance, int p, int m)
+{
+    int *clause = (int *)malloc(sizeof(int) * distance);
+    int n = 0;
+    for(int j = 0; j < distance; j++) {
+        if ( p % problem->module == m) {
+            clause[n] = SAT_POS(j * problem->order + p);
+            n++;
+        }
+    }
+    sat_add_clause(sat, clause, n);
+    free(clause);
 }
 
-void extend_path(Space *space) {
-	int changed = 0;
-	for (Vertex *cur = space->start; cur->succ != NULL;) {
-		Vertex *nxt = cur->succ;
+Problem *gen_problem()
+{
+    Problem *problem = new_problem();
+    int distance = problem->order;
 
-		int no_choices = 1;
-		Vertex **choices = (Vertex **)malloc(no_choices * sizeof(Vertex *));
-		if (choices == NULL) {
-			printf("Error in extend_path\nfailed to malloc\n");
-			exit(1);
-		}
-		choices[0] = nxt;
+    for (;;) {
+        Sat *original_sat = convert(problem, distance);
 
-		for (int i = 0; i < space->width; i++) {
-			for (int j = 0; j < space->width; j++) {
-				if (i == j) {
-					if (
-							cur->row != nxt->row &&
-							i != cur->col && i != nxt->col &&
-							j != cur->col && j != nxt->col
-					   ) {
-						// save memory
-						Vertex *a = (Vertex *)malloc(sizeof(Vertex));
-						Vertex *b = (Vertex *)malloc(sizeof(Vertex));
+        int *choices = (int *)malloc(sizeof(int) * problem->order * problem->module);
+        int count = 0;
+        for (int i = 0; i < problem->order * problem->module; i++) {
+            if (problem->assignment[i / problem->module] == -1) {
+                Sat *sat = sat_clone_formula(original_sat);
 
-						// set position
-						a->row = cur->row; a->col = i;
-						b->row = nxt->row; b->col = j;
+                sat_add_assignment(sat, problem, distance, i / problem->module, i % problem->module);
 
-						// connect
-						cur->succ = a;
-						a->succ = b;
-						b->succ = nxt;
+                SatResult result = sat_solve(sat);
 
-						if (
-								is_crossed(cur, space) ||
-								is_crossed(a, space) ||
-								is_crossed(b, space)
-						   ) {
-							// reconnect
-							cur->succ = nxt;
+                if (result == SAT_RESULT_SAT) {
+                    printf("choices[%d] = %d, %d\n", count, i / problem->module, i % problem->module);
+                    choices[count] = i;
+                    count++;
+                } else if (result == SAT_RESULT_UNSAT) {
 
-							free(a);
-							free(b);
-						} else {
-							// extend choices
-							no_choices++;
-							Vertex **tmp = (Vertex **)realloc(choices, no_choices * sizeof(Vertex *));
-							if (tmp == NULL) {
-								printf("Error in extend_route\nfailed to realloc\n");
-								free(choices);
-								exit(1);
-							}
-							choices = tmp;
-							choices[no_choices-1] = a;
-						}
-					}
-				} else {
-					for (int k = 0; k < space->height; k++) {
-						if (
-								i != cur->col && i != nxt->col &&
-								j != cur->col && j != nxt->col &&
-								k != cur->row && k != nxt->row
-						   ) {
-							// save memory
-							Vertex *a = (Vertex *)malloc(sizeof(Vertex));
-							Vertex *b = (Vertex *)malloc(sizeof(Vertex));
-							Vertex *c = (Vertex *)malloc(sizeof(Vertex));
-							Vertex *d = (Vertex *)malloc(sizeof(Vertex));
+                } else {
+                    printf("ERROR\n");
+                    sat_destroy(sat);
+                    free_problem(problem);
+                    exit(1);
+                }
 
-							// set position
-							a->row = cur->row; a->col = i;
-							b->row = k; b->col = i;
-							c->row = k; c->col = j;
-							d->row = nxt->row; d->col = j;
+                sat_destroy(sat);
+            } 
+        }
 
-							// connect
-							cur->succ = a;
-							a->succ = b;
-							b->succ = c;
-							c->succ = d;
-							d->succ = nxt;
+        if (count != 0) {
+            int choice = (int)(rand() / (RAND_MAX + 1.0) * count);
+            int p = choices[choice] / problem->module;
+            int m = choices[choice] % problem->module;
 
-							if (
-									is_crossed(cur, space) ||
-									is_crossed(a, space) ||
-									is_crossed(b, space) ||
-									is_crossed(c, space) ||
-									is_crossed(d, space)
-							   ) {
-								// reconnect
-								cur->succ = nxt;
+            printf("choices[%d] = %d, %d\n\n", choice, choices[choice] / problem->module, choices[choice] % problem->module);
 
-								free(a);
-								free(b);
-								free(c);
-								free(d);
-							} else {
-								// extend choices
-								no_choices++;
-								Vertex **tmp = (Vertex **)realloc(choices, no_choices * sizeof(Vertex *));
-								if (tmp == NULL) {
-									printf("Error in extend_route\nfailed to realloc\n");
-									free(choices);
-									exit(1);
-								}
-								choices = tmp;
-								choices[no_choices-1] = a;
-							}
-						}
-					}
-				}
-			}
-		}
+            problem->assignment[p] = m;
 
-		for (int i = 0; i < space->width; i++) {
-			for (int j = 0; j < space->height; j++) {
-				if (
-						i != cur->col && i != nxt->col &&
-						j != cur->row && j != nxt->row
-				   ) {
-					// save memory
-					Vertex *a = (Vertex *)malloc(sizeof(Vertex));
-					Vertex *b = (Vertex *)malloc(sizeof(Vertex));
-					Vertex *c = (Vertex *)malloc(sizeof(Vertex));
+            sat_add_assignment(original_sat, problem, distance, p, m);
 
-					// set position
-					a->row = cur->row; a->col = i;
-					b->row = j; b->col = i;
-					c->row = j; c->col = nxt->col;
+            SatResult result = sat_solve(original_sat);
 
-					// connect
-					cur->succ = a;
-					a->succ = b;
-					b->succ = c;
-					c->succ = nxt;
+            if (result == SAT_RESULT_SAT) {
+                Sat *sat = sat_clone_formula(original_sat);
 
-					if (
-							is_crossed(cur, space) ||
-							is_crossed(a, space) ||
-							is_crossed(b, space) ||
-							is_crossed(c, space)
-					   ) {
-						// reconnect
-						cur->succ = nxt;
+                int *clause = (int *)malloc(sizeof(int) * distance);
+                for (int i = 0; i < distance; i++) {
+                    for (int j = 0; j < problem->order; j++) {
+                        if (sat_value(original_sat, i * problem->order + j)) {
+                            clause[i] = SAT_NEG(i * problem->order + j);
+                            break;
+                        }
+                    }
+                }
+                sat_add_clause(sat, clause, distance);
+                free(clause);
 
-						free(a);
-						free(b);
-						free(c);
-					} else {
-						// extend choices
-						no_choices++;
-						Vertex **tmp = (Vertex **)realloc(choices, no_choices * sizeof(Vertex *));
-						if (tmp == NULL) {
-							printf("Error in extend_route\nfailed to realloc\n");
-							free(choices);
-							exit(1);
-						}
-						choices = tmp;
-						choices[no_choices-1] = a;
-					}
-				}
-			}
-		}
+                SatResult uniqueness = sat_solve(sat);
 
-		for (int i = 0; i < space->height; i++) {
-			for (int j = 0; j < space->width; j++) {
-				if (
-						i != cur->row && i != nxt->row &&
-						j != cur->col && j != nxt->col
-				   ) {
-					// save memory
-					Vertex *a = (Vertex *)malloc(sizeof(Vertex));
-					Vertex *b = (Vertex *)malloc(sizeof(Vertex));
-					Vertex *c = (Vertex *)malloc(sizeof(Vertex));
-
-					// set position
-					a->row = i; a->col = cur->col;
-					b->row = i; b->col = j;
-					c->row = nxt->row; c->col = j;
-
-					// connect
-					cur->succ = a;
-					a->succ = b;
-					b->succ = c;
-					c->succ = nxt;
-
-					if (
-							is_crossed(cur, space) ||
-							is_crossed(a, space) ||
-							is_crossed(b, space) ||
-							is_crossed(c, space)
-					   ) {
-						// reconnect
-						cur->succ = nxt;
-
-						free(a);
-						free(b);
-						free(c);
-					} else {
-						// extend choices
-						no_choices++;
-						Vertex **tmp = (Vertex **)realloc(choices, no_choices * sizeof(Vertex *));
-						if (tmp == NULL) {
-							printf("Error in extend_route\nfailed to realloc\n");
-							free(choices);
-							exit(1);
-						}
-						choices = tmp;
-						choices[no_choices-1] = a;
-					}
-				}
-			}
-		}
-
-		for (int i = 0; i < space->height; i++) {
-			for (int j = 0; j < space->height; j++) {
-				if (i == j) {
-					if (
-							cur->col != nxt->col &&
-							i != cur->row && i != nxt->row &&
-							j != cur->row && j != nxt->row
-					   ) {
-						// save memory
-						Vertex *a = (Vertex *)malloc(sizeof(Vertex));
-						Vertex *b = (Vertex *)malloc(sizeof(Vertex));
-
-						// set position
-						a->row = i; a->col = cur->col;
-						b->row = j; b->col = nxt->col;
-
-						// connect
-						cur->succ = a;
-						a->succ = b;
-						b->succ = nxt;
-
-						if (
-								is_crossed(cur, space) ||
-								is_crossed(a, space) ||
-								is_crossed(b, space)
-						   ) {
-							// reconnect
-							cur->succ = nxt;
-
-							free(a);
-							free(b);
-						} else {
-							// extend choices
-							no_choices++;
-							Vertex **tmp = (Vertex **)realloc(choices, no_choices * sizeof(Vertex *));
-							if (tmp == NULL) {
-								printf("Error in extend_route\nfailed to realloc\n");
-								free(choices);
-								exit(1);
-							}
-							choices = tmp;
-							choices[no_choices-1] = a;
-						}
-					}
-				} else {
-					for (int k = 0; k < space->width; k++) {
-						if (
-								i != cur->row && i != nxt->row &&
-								j != cur->row && j != nxt->row &&
-								k != cur->col && k != nxt->col
-						   ) {
-							// save memory
-							Vertex *a = (Vertex *)malloc(sizeof(Vertex));
-							Vertex *b = (Vertex *)malloc(sizeof(Vertex));
-							Vertex *c = (Vertex *)malloc(sizeof(Vertex));
-							Vertex *d = (Vertex *)malloc(sizeof(Vertex));
-
-							// set position
-							a->row = i; a->col = cur->col;
-							b->row = i; b->col = k;
-							c->row = j; c->col = k;
-							d->row = j; d->col = nxt->col;
-
-							// connect
-							cur->succ = a;
-							a->succ = b;
-							b->succ = c;
-							c->succ = d;
-							d->succ = nxt;
-
-							if (
-									is_crossed(cur, space) ||
-									is_crossed(a, space) ||
-									is_crossed(b, space) ||
-									is_crossed(c, space) ||
-									is_crossed(d, space)
-							   ) {
-								// reconnect
-								cur->succ = nxt;
-
-								free(a);
-								free(b);
-								free(c);
-								free(d);
-							} else {
-								// extend choices
-								no_choices++;
-								Vertex **tmp = (Vertex **)realloc(choices, no_choices * sizeof(Vertex *));
-								if (tmp == NULL) {
-									printf("Error in extend_route\nfailed to realloc\n");
-									free(choices);
-									exit(1);
-								}
-								choices = tmp;
-								choices[no_choices-1] = a;
-							}
-						}
-					}
-				}
-			}
-		}
-
-		if (no_choices == 1) {
-			cur->succ = nxt;
-		} else {
-			changed = 1;
-
-			int choice = (rand() / (RAND_MAX + 1.0) * no_choices);
-			cur->succ = choices[choice];
-
-			for (int i = 1; i < no_choices; i++) {
-				if (i != choice) {
-					free_vertices(choices[i], nxt);
-				}
-			}
-			free(choices);
-		}
-		cur = nxt;
-	}
-	if (changed) {
-		extend_path(space);
-	}
+                if (uniqueness == SAT_RESULT_SAT) {
+                    sat_destroy(sat);
+                } else if (uniqueness == SAT_RESULT_UNSAT) {
+                    problem->uniqueness = 1;
+                    printf("UNIQUE problem\n");
+                    sat_destroy(sat);
+                    sat_destroy(original_sat);
+                    break;
+                } else {
+                    printf("ERROR\n");
+                    sat_destroy(sat);
+                    free_problem(problem);
+                    exit(1);
+                }
+            } else {
+                printf("ERROR\n");
+                sat_destroy(original_sat); 
+                free_problem(problem);
+                exit(1);
+            }
+        } else {
+            problem->uniqueness = 0;
+            printf("NOT UNIQUE\n");
+            sat_destroy(original_sat);
+            break;
+        }
+    }
+    return problem;
 }
 
-void assign_number(Space *space) {
-	int index = 0;
+void check_answer(Problem *problem)
+{
+    while(1) {
+        int distance = problem->order;
+        int *answer = (int *)malloc(sizeof(int) * distance);
 
-	Vertex *cur;
-	for (cur = space->start; cur->succ != NULL;) {
-		Vertex *nxt = cur->succ;
-		if (cur->row == nxt->row && cur->col == nxt->col) {
-			printf("Error in assign_number\ncur-nxt is not edge\n");
-			exit(1);
-		} else if (cur->row == nxt->row && cur->col < nxt->col) {
-			cur->value = index % space->modulus;
-			index++;
+        int flag = 0;
+        for (int i = 0; i < problem->height && flag == 0; i++) {
+            for(int j = 0; j < problem->width && flag == 0; j++) {
+                int a;
+                scanf("%d", &a);
+                answer[i * problem->width + j] = a % problem->module;
 
-			Vertex *tmp = cur;
-			for (int i = cur->col + 1; i < nxt->col; i++) {
-				Vertex *a = (Vertex *)malloc(sizeof(Vertex));
+                if (a == -1) {
 
-				a->row = cur->row; a->col = i;
-				a->value = index % space->modulus;
-				index++;
+                } else if (a == problem->order) {
+                    flag = 1;
+                } else {
+                }
+            }
+        }
+        if (flag == 1) {
+            Sat *sat = convert(problem, distance);
 
-				tmp->succ = a;
-				tmp = a;
-			}
-			tmp->succ = nxt;
-		} else if (cur->row == nxt->row && cur->col > nxt->col) {
-			cur->value = index % space->modulus;
-			index++;
+            SatResult result = sat_solve(sat);
 
-			Vertex *tmp = cur;
-			for (int i = cur->col - 1; i > nxt->col; i--) {
-				Vertex *a = (Vertex *)malloc(sizeof(Vertex));
+            if (result == SAT_RESULT_SAT) {
+                if (problem->uniqueness == 1) {
+                    printf("Here is the only solution: {\n");
+                } else {
+                    printf("Here is one of the solutions: {\n");
+                }
+                for (int i = 0; i < problem->width; i++) {
+                    printf("\t");
+                    for (int j = 0; j < problem->height; j++) {
+                        for (int k = 0; k < distance; k++) {
+                            if (sat_value(sat, k * problem->order + i * problem->width + j)) {
+                                printf("%4d,", k % problem->module);
+                            }
+                        }
+                    }
+                    printf("\n");
+                }
+                printf("}\n");
 
-				a->row = cur->row; a->col = i;
-				a->value = index % space->modulus;
-				index++;
+                sat_destroy(sat);
+                break;
+            } else {
+                printf("ERROR\n");
+                sat_destroy(sat);
+                free_problem(problem);
+                exit(1);
+            }
+        }
 
-				tmp->succ = a;
-				tmp = a;
-			}
-			tmp->succ = nxt;
-		} else if (cur->col == nxt->col && cur->row < nxt->row) {
-			cur->value = index % space->modulus;
-			index++;
+        free(problem->assignment);
+        problem->assignment = answer;
 
-			Vertex *tmp = cur;
-			for (int i = cur->row + 1; i < nxt->row; i++) {
-				Vertex *a = (Vertex *)malloc(sizeof(Vertex));
+        Sat *sat = convert(problem, distance);
 
-				a->row = i; a->col = cur->col;
-				a->value = index % space->modulus;
-				index++;
+        SatResult result = sat_solve(sat);
 
-				tmp->succ = a;
-				tmp = a;
-			}
-			tmp->succ = nxt;
-		} else if (cur->col == nxt->col && cur->row > nxt->row) {
-			cur->value = index % space->modulus;
-			index++;
+        if (result == SAT_RESULT_SAT) {
+            if (problem->uniqueness == 1) {
+                printf("The only solution!\n");
+                sat_destroy(sat);
+                break;
+            } else {
+                printf("One of the corret answers.\n");
+                sat_destroy(sat);
+            }
+        } else if (result == SAT_RESULT_UNSAT) {
+            printf("Incorrect answer\n");
+            sat_destroy(sat);
+        } else {
+            printf("ERROR\n");
+            sat_destroy(sat);
+            free_problem(problem);
+            exit(1);
+        }
 
-			Vertex *tmp = cur;
-			for (int i = cur->row - 1; i > nxt->row; i--) {
-				Vertex *a = (Vertex *)malloc(sizeof(Vertex));
-
-				a->row = i; a->col = cur->col;
-				a->value = index % space->modulus;
-				index++;
-
-				tmp->succ = a;
-				tmp = a;
-			}
-			tmp->succ = nxt;
-		} else {
-			printf("Error in assign_number\ncur-nxt is neither vertical nor horizontal edge\n");
-			exit(1);
-		}
-		cur = nxt;
-	}
-	cur->value = index % space->modulus;
+        char a;
+        printf("Try again or find another solution? (y/n)");
+        scanf("%c", &a);
+        if (a == 'y') {
+            continue;
+        } else {
+            break;
+        }
+    }
 }
 
-Vertex *find_vertex(int row, int col, Space *space) {
-	Vertex *cur;
-	for (cur = space->start; cur->succ != NULL; cur = cur->succ) {
-		if (cur->row == row && cur->col == col) {
-			return cur;
-		}
-	}
-	if (cur->row == row && cur->col == col) {
-		return cur;
-	}
-	return NULL;
-}
+int main(void)
+{
+    srand(time(NULL));
 
-void print_assignment(Space *space) {
-	for (int i = 0; i < space->height; i++) {
-		for (int j = 0; j < space->width; j++) {
-			Vertex *cur = find_vertex(i, j, space);
-			if (cur) {
-				printf(" %2d", cur->value);
-			} else {
-				printf("   ");
-			}
-		}
-		printf("\n");
-	}
-}
+    Problem *problem = gen_problem();
 
-void gen_path(Space *space) {
-	// init path, a sequence of vertices
-	space->start = (Vertex *)malloc(sizeof(Vertex));
-	space->goal = (Vertex *)malloc(sizeof(Vertex));
+    print_problem(problem);
 
-	space->start->succ = space->goal;
-	space->start->row = 0; space->start->col = 0;
-	space->goal->row = 8; space->goal->col = 0;
+    check_answer(problem);
 
-	extend_path(space);
+    free_problem(problem);
 
-	assign_number(space);
-
-	print_assignment(space);
-
-	free_vertices(space->start, NULL);
-	free(space->goal);
-}
-
-int main(void) {
-	// set seed
-	srand(time(NULL));
-
-	// init space
-	Space space = {
-		.height = 9,
-		.width = 16,
-		.modulus = 7
-	};
-
-	gen_path(&space);
-
-	
-
+    return 0;
 }
