@@ -634,6 +634,8 @@ int sat_add_clause(Sat *s, const int *lits, int n)
     if (!s || s->solving || s->oom || n < 0 || (n > 0 && !lits)) return 0;
     if (!s->ok) return 0;
 
+    cancel_until(s, 0);
+
     IntVec tmp = {0};
     if (!intvec_reserve(s, &tmp, n)) {
         free(tmp.data);

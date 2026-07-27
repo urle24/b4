@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
-#include "cdcl_sat_clone.c"
+#include "cdcl_sat.c"
 
 typedef struct {
     int height;
@@ -19,10 +19,10 @@ typedef struct {
 Problem *new_problem()
 {
     Problem *problem = (Problem *)malloc(sizeof(Problem));
-    problem->height = 3;
-    problem->width = 3;
+    problem->height = 4;
+    problem->width = 8;
     problem->order = problem->height * problem->width;
-    problem->module = 3;
+    problem->module = 5;
     problem->start = 0;
     problem->goal = problem->order - problem->width;
 
@@ -35,7 +35,7 @@ Problem *new_problem()
             edges[i][degrees[i]] = i - problem->width;
             degrees[i]++;
         }
-	if (i % problem->width != 0) {
+        if (i % problem->width != 0) {
             edges[i][degrees[i]] = i - 1;
             degrees[i]++;
         }
@@ -50,12 +50,12 @@ Problem *new_problem()
     }
     problem->degrees = degrees;
     problem->edges = edges;
+    problem->uniqueness = 0;
     problem->assignment = (int *)malloc(sizeof(int) * problem->order);
     for (int i = 0; i < problem->order; i++) {
         problem->assignment[i] = -1;
     }
-    problem->assignment[problem->start] = 0 % problem->module;
-    problem->assignment[problem->goal] = (problem->order - 1) % problem->module;
+    problem->assignment[problem->start] = 0;
 
     return problem;
 }
@@ -77,6 +77,7 @@ void debug_problem(Problem *problem)
         printf("}\n");
     }
 
+    printf("uniqueness = %d\n", problem->uniqueness);
     printf("assignment = {\n");
     for (int i = 0; i < problem->height; i++) {
         printf("\t");
@@ -141,7 +142,7 @@ Sat *convert(Problem *problem, int distance)
     free(clause_g);
 
     for (int i = 0; i < distance; i++) {
-	int *clause = (int *)malloc(sizeof(int) * problem->order);
+        int *clause = (int *)malloc(sizeof(int) * problem->order);
         for(int j = 0; j < problem->order; j++) {
             clause[j] = SAT_POS(i * problem->order + j);
         }
@@ -207,14 +208,85 @@ void sat_add_assignment(Sat *sat, Problem *problem, int distance, int p, int m)
 {
     int *clause = (int *)malloc(sizeof(int) * distance);
     int n = 0;
-    for(int j = 0; j < distance; j++) {
-        if ( p % problem->module == m) {
-            clause[n] = SAT_POS(j * problem->order + p);
+    for(int i = 0; i < distance; i++) {
+        if (i % problem->module == m) {
+            clause[n] = SAT_POS(i * problem->order + p);
             n++;
         }
     }
     sat_add_clause(sat, clause, n);
     free(clause);
+}
+
+int *get_solution(Sat *sat, Problem *problem)
+{
+    int distance = problem->order;
+
+    int *solution = (int *)malloc(sizeof(int) * problem->order);
+
+    for (int i = 0; i < problem->height; i++) {
+        for (int j = 0; j < problem->width; j++) {
+            int p = i * problem->width + j;
+            for (int k = 0; k < distance; k++) {
+                if (sat_value(sat, k * problem->order + p) == 1) {
+                    solution[p] = k;
+                }
+            }
+        }
+    }
+
+    return solution;
+}
+
+void print_solution(int *solution, Problem *problem)
+{
+    for (int i = 0; i < problem->height; i++) {
+        printf("\t");
+        for (int j = 0; j < problem->width; j++) {
+            printf("%4d,", solution[i * problem->width + j]);
+        }
+        printf("\n");
+    }
+    
+}
+
+void sat_exclude_solution(Sat *sat, Problem *problem, int *solution) {
+    int *clause = (int *)malloc(sizeof(int) * problem->order);
+    int n = 0;
+    for (int i = 0; i < problem->height; i++) {
+        for (int j = 0; j < problem->width; j++) {
+            int p = i * problem->width + j;
+            if (p != problem->start && p != problem->goal) {
+                clause[n] = SAT_NEG(solution[p] * problem->order + p);
+                n++;
+            }
+        }
+    }
+    sat_add_clause(sat, clause, n);
+    free(clause);
+}
+
+Problem *set_problem()
+{
+    Problem *problem = new_problem();
+
+    int *answer = (int *)malloc(sizeof(int) * problem->order);
+    for (int i = 0; i < problem->height; i++) {
+        for(int j = 0; j < problem->width; j++) {
+            int a;
+            scanf("%d", &a);
+
+            if (a == -1) {
+                answer[i * problem->width + j] = -1;
+            } else {
+                answer[i * problem->width + j] = a % problem->module;
+            }
+        }
+    }
+    free(problem->assignment);
+    problem->assignment = answer;
+
+    return problem;
 }
 
 Problem *gen_problem()
@@ -228,15 +300,17 @@ Problem *gen_problem()
         int *choices = (int *)malloc(sizeof(int) * problem->order * problem->module);
         int count = 0;
         for (int i = 0; i < problem->order * problem->module; i++) {
-            if (problem->assignment[i / problem->module] == -1) {
+            int p = i / problem->module;
+            int m = i % problem->module;
+
+            if (problem->assignment[p] == -1) {
                 Sat *sat = sat_clone_formula(original_sat);
 
-                sat_add_assignment(sat, problem, distance, i / problem->module, i % problem->module);
+                sat_add_assignment(sat, problem, distance, p, m);
 
                 SatResult result = sat_solve(sat);
 
                 if (result == SAT_RESULT_SAT) {
-                    printf("choices[%d] = %d, %d\n", count, i / problem->module, i % problem->module);
                     choices[count] = i;
                     count++;
                 } else if (result == SAT_RESULT_UNSAT) {
@@ -257,8 +331,6 @@ Problem *gen_problem()
             int p = choices[choice] / problem->module;
             int m = choices[choice] % problem->module;
 
-            printf("choices[%d] = %d, %d\n\n", choice, choices[choice] / problem->module, choices[choice] % problem->module);
-
             problem->assignment[p] = m;
 
             sat_add_assignment(original_sat, problem, distance, p, m);
@@ -268,17 +340,11 @@ Problem *gen_problem()
             if (result == SAT_RESULT_SAT) {
                 Sat *sat = sat_clone_formula(original_sat);
 
-                int *clause = (int *)malloc(sizeof(int) * distance);
-                for (int i = 0; i < distance; i++) {
-                    for (int j = 0; j < problem->order; j++) {
-                        if (sat_value(original_sat, i * problem->order + j)) {
-                            clause[i] = SAT_NEG(i * problem->order + j);
-                            break;
-                        }
-                    }
-                }
-                sat_add_clause(sat, clause, distance);
-                free(clause);
+                int *solution = get_solution(original_sat, problem);
+
+                sat_exclude_solution(sat, problem, solution);
+
+                free(solution);
 
                 SatResult uniqueness = sat_solve(sat);
 
@@ -308,13 +374,44 @@ Problem *gen_problem()
             sat_destroy(original_sat);
             break;
         }
+        sat_destroy(original_sat);
     }
     return problem;
 }
 
+void find_answer(Problem *problem)
+{
+    int distance = problem->order;
+    Sat *sat = convert(problem, distance);
+
+    while (1) {
+        SatResult result = sat_solve(sat);
+
+        if (result == SAT_RESULT_SAT) {
+            int *solution = get_solution(sat, problem);
+
+            printf("SAT\n");
+
+            print_solution(solution, problem);
+
+            sat_exclude_solution(sat, problem, solution);
+
+            free(solution);
+        } else if (result == SAT_RESULT_UNSAT) {
+            printf("UNSAT\n");
+            break;
+        } else {
+            printf("ERROR\n");
+            sat_destroy(sat);
+            free_problem(problem);
+            exit(1);
+        }
+    }
+}
+
 void check_answer(Problem *problem)
 {
-    while(1) {
+    while (1) {
         int distance = problem->order;
         int *answer = (int *)malloc(sizeof(int) * distance);
 
@@ -323,13 +420,13 @@ void check_answer(Problem *problem)
             for(int j = 0; j < problem->width && flag == 0; j++) {
                 int a;
                 scanf("%d", &a);
-                answer[i * problem->width + j] = a % problem->module;
 
                 if (a == -1) {
-
+                    answer[i * problem->width + j] = -1;
                 } else if (a == problem->order) {
                     flag = 1;
                 } else {
+                    answer[i * problem->width + j] = a % problem->module;
                 }
             }
         }
@@ -344,11 +441,11 @@ void check_answer(Problem *problem)
                 } else {
                     printf("Here is one of the solutions: {\n");
                 }
-                for (int i = 0; i < problem->width; i++) {
+                for (int i = 0; i < problem->height; i++) {
                     printf("\t");
-                    for (int j = 0; j < problem->height; j++) {
+                    for (int j = 0; j < problem->width; j++) {
                         for (int k = 0; k < distance; k++) {
-                            if (sat_value(sat, k * problem->order + i * problem->width + j)) {
+                            if (sat_value(sat, k * problem->order + i * problem->width + j) == 1) {
                                 printf("%4d,", k % problem->module);
                             }
                         }
@@ -395,7 +492,7 @@ void check_answer(Problem *problem)
 
         char a;
         printf("Try again or find another solution? (y/n)");
-        scanf("%c", &a);
+        scanf(" %c", &a);
         if (a == 'y') {
             continue;
         } else {
